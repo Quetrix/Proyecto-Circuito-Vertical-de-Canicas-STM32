@@ -1,0 +1,21 @@
+# Ignorar archivos compilados de STM32
+stm32-firmware/**/Debug/
+stm32-firmware/**/Release/
+*.bin
+*.elf
+*.hex
+*.map
+*.o
+*.su
+
+# Ignorar archivos temporales de Python
+__pycache__/
+*.py[cod]
+
+# Ignorar archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Ignorar configuraciones locales de IDE (opcional, a veces conviene subir el .project)
+.settings/
+.vscode/
