@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mechatronic System Simulator v2</title>
+    <style>
+        :root {
+            --bg-color: #121214;
+            --panel-bg: #1e1e24;
+            --accent-blue: #00d2ff;
+            --accent-green: #00ff88;
+            --accent-yellow: #ffcc00;
+            --accent-red: #ff3333;
+            --text-main: #e0e0e0;
+            --text-dim: #888;
+            --zone-bg: #2c2c35;
+            --zone-border: #444;
+        }
+
+        * { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            height: 100vh;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        /* --- Layout Wrapper --- */
+        .hmi-container {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 20px;
+            background: var(--panel-bg);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.7);
+            border: 1px solid #333;
+            max-width: 1000px;
+            width: 95%;
+        }
+
+        /* --- Left Sidebar (Instructions) --- */
+        .sidebar {
+            background: rgba(0,0,0,0.2);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar h3 { color: var(--accent-blue); margin-top: 0; font-size: 1.1rem; text-transform: uppercase; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        .sidebar ol { padding-left: 20px; color: #ccc; font-size: 0.9rem; line-height: 1.6; }
+        .sidebar li { margin-bottom: 8px; }
+        .note { font-size: 0.8rem; color: var(--accent-yellow); margin-top: auto; padding: 10px; background: rgba(255, 204, 0, 0.1); border-radius: 4px; border-left: 3px solid var(--accent-yellow); }
+
+        /* --- Main Center Panel --- */
+        .main-panel {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+        }
+
+        /* Top Header: Inventory & Status */
+        .header-row {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            background: #111;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+
+        .inventory-group { display: flex; gap: 15px; align-items: center; }
+        .inv-block { display: flex; flex-direction: column; align-items: center; min-width: 70px; }
+        .inv-label { font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
+        .inv-val { font-size: 1.8rem; font-weight: bold; color: #fff; }
+        
+        .transfer-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .btn-transfer {
+            background: #333;
+            border: 1px solid #555;
+            color: #fff;
+            width: 30px;
+            height: 30px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1.2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: 0.2s;
+        }
+        .btn-transfer:hover { background: var(--accent-blue); border-color: var(--accent-blue); color: #000; }
+        .btn-transfer:disabled { opacity: 0.3; cursor: not-allowed; background: #222; border-color: #333; color: #555; }
+
+        .status-screen {
+            font-family: 'Courier New', monospace;
+            color: var(--accent-green);
+            font-weight: bold;
+            text-align: right;
+            background: rgba(0, 255, 136, 0.1);
+            padding: 5px 10px;
+            border-radius: 4px;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            min-width: 150px;
+        }
+
+        /* --- The Grid --- */
+        .grid-wrapper {
+            position: relative;
+            padding-right: 40px; /* Space for the lift pipe */
+        }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(3, 80px);
+            gap: 10px;
+            position: relative;
+            padding: 10px;
+            border: 2px dashed #333;
+            border-radius: 10px;
+            background: rgba(0,0,0,0.3);
+        }
+
+        /* The Return Pipe Visual */
+        .return-pipe {
+            position: absolute;
+            right: -10px;
+            top: 0;
+            bottom: 0;
+            width: 40px;
+            border-right: 4px solid #333;
+            border-top: 4px solid #333;
+            border-bottom: 4px solid #333;
+            border-radius: 0 10px 10px 0;
+            z-index: 0;
+            opacity: 0.5;
+        }
+        .return-pipe::before {
+            content: '▲';
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #333;
+            font-size: 1.5rem;
+        }
+
+        .zone {
+            width: 80px;
+            height: 80px;
+            background: var(--zone-bg);
+            border: 2px solid var(--zone-border);
+            border-radius: 6px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            font-size: 1.2rem;
+            color: #666;
+            transition: all 0.2s;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Interaction States for Zones */
+        .zone.entry-point {
+            cursor: pointer;
+            border-color: var(--accent-blue);
+            color: var(--text-main);
+            background: rgba(0, 210, 255, 0.05);
+        }
+        .zone.entry-point:hover { background: rgba(0, 210, 255, 0.2); box-shadow: 0 0 15px rgba(0,210,255,0.3); }
+        
+        .zone.path-active {
+            background: rgba(255, 204, 0, 0.15); 
+            border-color: var(--accent-yellow);
+            color: #fff;
+            box-shadow: 0 0 8px rgba(255, 204, 0, 0.2);
+        }
+
+        .destination {
+            grid-column: 1 / span 3;
+            width: 100%;
+            height: 60px;
+            margin-top: 10px;
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-size: 1rem;
+        }
+        .destination.reached {
+            background: var(--accent-green);
+            color: #000;
+            box-shadow: 0 0 20px var(--accent-green);
+        }
+
+        /* --- The Marble --- */
+        .marble {
+            width: 40px;
+            height: 40px;
+            background: radial-gradient(circle at 30% 30%, #ff5577, #990033);
+            border-radius: 50%;
+            position: absolute;
+            z-index: 100;
+            box-shadow: 0 5px 10px rgba(0,0,0,0.5);
+            transition: top 0.4s linear, left 0.4s linear; /* Smooth movement */
+            display: none;
+            pointer-events: none;
+        }
+
+        /* --- Controls --- */
+        .control-panel {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            width: 100%;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #333;
+        }
+
+        /* Directional Pad Layout */
+        .d-pad {
+            grid-column: 1 / span 1;
+            display: grid;
+            grid-template-areas: 
+                ". . ."
+                "L D R";
+            gap: 5px;
+        }
+        .btn-dir { 
+            background: #3a3a45; color: white; border: none; 
+            padding: 10px; border-radius: 4px; cursor: pointer; font-weight: bold;
+            box-shadow: 0 4px 0 #222;
+            transition: 0.1s;
+        }
+        .btn-dir:hover { background: #4a4a55; }
+        .btn-dir:active { transform: translateY(4px); box-shadow: 0 0 0 #222; }
+        .btn-dir:disabled { opacity: 0.3; cursor: not-allowed; transform: none; box-shadow: none; }
+
+        /* Middle: Run Button */
+        .run-section {
+            grid-column: 2 / span 1;
+            display: flex;
+            justify-content: center;
+            align-items: end;
+        }
+        .btn-run {
+            width: 100%;
+            height: 100%;
+            background: var(--accent-green);
+            color: #003300;
+            border: none;
+            font-weight: 800;
+            text-transform: uppercase;
+            border-radius: 4px;
+            cursor: pointer;
+            opacity: 0.5;
+            pointer-events: none;
+            transition: 0.2s;
+            box-shadow: 0 4px 0 #004400;
+        }
+        .btn-run.ready { opacity: 1; pointer-events: all; box-shadow: 0 0 15px rgba(0,255,136,0.4); }
+        .btn-run:active { transform: translateY(2px); box-shadow: 0 2px 0 #004400; }
+
+        /* Right: Undo/Reset */
+        .utility-section {
+            grid-column: 3 / span 1;
+            display: flex;
+            justify-content: flex-end;
+            align-items: end;
+        }
+        
+        .btn-hybrid {
+            position: relative;
+            width: 100%;
+            height: 50px;
+            background: #444;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            overflow: hidden;
+            font-size: 0.85rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 4px 0 #222;
+        }
+
+        .btn-hybrid span { position: relative; z-index: 2; }
+        .btn-hybrid .sub { font-size: 0.6rem; color: #aaa; }
+        
+        /* Progress Bar for Reset */
+        .btn-hybrid::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; bottom: 0;
+            width: 0%;
+            background: var(--accent-red);
+            z-index: 1;
+            transition: width 0s; 
+        }
+        
+        .btn-hybrid.holding::after {
+            width: 100%;
+            transition: width 1s linear;
+        }
+        
+        .btn-hybrid:disabled { opacity: 0.3; pointer-events: none; box-shadow: none; }
+
+    </style>
+</head>
+<body>
+
+    <div class="hmi-container">
+        
+        <div class="sidebar">
+            <h3>Instructions</h3>
+            <ol>
+                <li>Manage Marbles: Use arrows to move between Barrel and Hand.</li>
+                <li><strong>To Start:</strong> Select an Entry Point (S1, S2, S3). Needs marble in Hand.</li>
+                <li>Plan Path: Use Arrows to guide marble to Destination.</li>
+                <li>Click "RUN JOURNEY" to execute.</li>
+                <li>Watch the lift return the marble to the Barrel.</li>
+            </ol>
+            <div class="note">
+                <strong>UNDO/RESET:</strong><br>
+                • Click: Undo last step.<br>
+                • Hold (1s): Reset System.
+            </div>
+        </div>
+
+        <div class="main-panel">
+            
+            <div class="header-row">
+                <div class="inventory-group">
+                    <div class="inv-block">
+                        <span class="inv-label">Estañón</span>
+                        <span class="inv-val" id="barrelVal" style="color: var(--accent-blue)">10</span>
+                    </div>
+
+                    <div class="transfer-controls">
+                        <button class="btn-transfer" id="btnToHand" onclick="transferToHand()" title="Take from Barrel">▼</button>
+                        <button class="btn-transfer" id="btnToBarrel" onclick="transferToBarrel()" title="Return to Barrel">▲</button>
+                    </div>
+
+                    <div class="inv-block">
+                        <span class="inv-label">Mano</span>
+                        <span class="inv-val" id="handVal">0</span>
+                    </div>
+                </div>
+                <div class="status-screen" id="statusText">SYSTEM IDLE</div>
+            </div>
+
+            <div class="grid-wrapper">
+                <div class="return-pipe"></div>
+
+                <div class="grid-container" id="gridBoard">
+                    <div class="marble" id="marble"></div>
+
+                    <div class="zone" id="z_0_0" onclick="selectEntry(0,0)">S1</div>
+                    <div class="zone" id="z_0_1" onclick="selectEntry(0,1)">S2</div>
+                    <div class="zone" id="z_0_2" onclick="selectEntry(0,2)">S3</div>
+
+                    <div class="zone" id="z_1_0">1</div>
+                    <div class="zone" id="z_1_1">2</div>
+                    <div class="zone" id="z_1_2">3</div>
+
+                    <div class="zone" id="z_2_0">4</div>
+                    <div class="zone" id="z_2_1">5</div>
+                    <div class="zone" id="z_2_2">6</div>
+
+                    <div class="zone" id="z_3_0">7</div>
+                    <div class="zone" id="z_3_1">8</div>
+                    <div class="zone" id="z_3_2">9</div>
+
+                    <div class="zone destination" id="z_4_1">Zona Destino</div>
+                </div>
+            </div>
+
+            <div class="control-panel">
+                <div class="d-pad">
+                    <div style="grid-area: L"><button class="btn-dir" id="btnLeft" onclick="planMove('Left')">⬅</button></div>
+                    <div style="grid-area: D"><button class="btn-dir" id="btnDown" onclick="planMove('Down')">⬇</button></div>
+                    <div style="grid-area: R"><button class="btn-dir" id="btnRight" onclick="planMove('Right')">➡</button></div>
+                </div>
+                
+                <div class="run-section">
+                    <button class="btn-run" id="btnRun" onclick="executeJourney()">Run Journey</button>
+                </div>
+
+                <div class="utility-section">
+                    <button class="btn-hybrid" id="btnUndo" 
+                        onmousedown="startHold()" ontouchstart="startHold()" 
+                        onmouseup="endHold()" ontouchend="endHold()" 
+                        onmouseleave="cancelHold()">
+                        <span>UNDO</span>
+                        <span class="sub">(Hold to Reset)</span>
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        /* --- System State --- */
+        const STATE = {
+            IDLE: 'IDLE',         // Waiting for selection or transfers
+            READY: 'READY',       // Has marble, can select Entry
+            PLANNING: 'PLANNING', // Building path
+            RUNNING: 'RUNNING'    // Animation occurring
+        };
+
+        let currentState = STATE.IDLE;
+        let barrelCount = 10;
+        let handCount = 0;
+        
+        // Path Logic: Array of objects {r: row, c: col}
+        let path = [];
+        
+        /* --- DOM Elements --- */
+        const elBarrel = document.getElementById('barrelVal');
+        const elHand = document.getElementById('handVal');
+        const elStatus = document.getElementById('statusText');
+        const elMarble = document.getElementById('marble');
+        
+        const btnToHand = document.getElementById('btnToHand');
+        const btnToBarrel = document.getElementById('btnToBarrel');
+        
+        const btnRun = document.getElementById('btnRun');
+        const btnUndo = document.getElementById('btnUndo');
+        const dirButtons = document.querySelectorAll('.btn-dir');
+        const zoneElements = document.querySelectorAll('.zone');
+
+        /* --- Initialization --- */
+        function updateUI() {
+            elBarrel.innerText = barrelCount;
+            elHand.innerText = handCount;
+
+            // 1. Manage Inventory Buttons
+            // Only allow transfers if we are NOT running a path
+            const transfersAllowed = (currentState === STATE.IDLE || currentState === STATE.READY);
+            btnToHand.disabled = !transfersAllowed || barrelCount <= 0;
+            btnToBarrel.disabled = !transfersAllowed || handCount <= 0;
+
+            // 2. Check if we can start a journey (Need Hand > 0)
+            // If we are idle but have marbles in hand, we are technically READY
+            if (currentState === STATE.IDLE && handCount > 0) {
+                currentState = STATE.READY;
+            }
+            if (currentState === STATE.READY && handCount === 0) {
+                currentState = STATE.IDLE;
+            }
+
+            // 3. Manage Main State Visuals
+            if (currentState === STATE.IDLE) {
+                elStatus.innerText = "GET MARBLE";
+                elStatus.style.color = "#888";
+                disableGridInteraction();
+                disableControls();
+            } 
+            else if (currentState === STATE.READY) {
+                elStatus.innerText = "SELECT S1-S3";
+                elStatus.style.color = "var(--accent-blue)";
+                enableGridEntries();
+                disableControls();
+            }
+            else if (currentState === STATE.PLANNING) {
+                elStatus.innerText = "PLAN ROUTE";
+                elStatus.style.color = "var(--accent-yellow)";
+                disableGridInteraction(); 
+                enableControls();
+            }
+            else if (currentState === STATE.RUNNING) {
+                elStatus.innerText = "EXECUTING...";
+                elStatus.style.color = "var(--accent-green)";
+                disableControls();
+                btnUndo.disabled = true;
+                // Also disable transfers during run
+                btnToHand.disabled = true;
+                btnToBarrel.disabled = true;
+            }
+
+            // 4. Run Button Logic
+            if (path.length > 0) {
+                const lastStep = path[path.length - 1];
+                if (lastStep.r === 4) {
+                    btnRun.classList.add('ready');
+                } else {
+                    btnRun.classList.remove('ready');
+                }
+            } else {
+                btnRun.classList.remove('ready');
+            }
+        }
+
+        function disableGridInteraction() {
+            zoneElements.forEach(el => el.classList.remove('entry-point'));
+        }
+
+        function enableGridEntries() {
+            document.getElementById('z_0_0').classList.add('entry-point');
+            document.getElementById('z_0_1').classList.add('entry-point');
+            document.getElementById('z_0_2').classList.add('entry-point');
+        }
+
+        function disableControls() {
+            dirButtons.forEach(b => b.disabled = true);
+            btnUndo.disabled = true;
+        }
+
+        function enableControls() {
+            dirButtons.forEach(b => b.disabled = false);
+            btnUndo.disabled = false;
+        }
+
+        /* --- Inventory Logic (Free Flow) --- */
+        function transferToHand() {
+            if (barrelCount > 0) {
+                barrelCount--;
+                handCount++;
+                updateUI();
+            }
+        }
+
+        function transferToBarrel() {
+            if (handCount > 0) {
+                handCount--;
+                barrelCount++;
+                updateUI();
+            }
+        }
+
+        /* --- Setup Phase: Entry Selection --- */
+        function selectEntry(r, c) {
+            if (currentState !== STATE.READY) return;
+
+            handCount--; // Remove from hand to place on board
+            currentState = STATE.PLANNING;
+            
+            // Start Path
+            path = [{r: r, c: c}];
+            
+            // Render Ghost Marble immediately
+            renderPathVisuals();
+            updateUI();
+        }
+
+        /* --- Planning Phase --- */
+        function planMove(direction) {
+            if (currentState !== STATE.PLANNING) return;
+
+            const currentPos = path[path.length - 1];
+            
+            // If we are already at destination (Row 4), no more moves
+            if (currentPos.r === 4) return; 
+
+            let nextPos = { r: currentPos.r, c: currentPos.c };
+
+            if (direction === 'Left') nextPos.c -= 1;
+            if (direction === 'Right') nextPos.c += 1;
+            if (direction === 'Down') nextPos.r += 1;
+
+            if (isValidMove(currentPos, nextPos)) {
+                path.push(nextPos);
+                renderPathVisuals();
+                updateUI();
+            } else {
+                // Visual feedback for error
+                elStatus.style.color = "var(--accent-red)";
+                elStatus.innerText = "INVALID MOVE";
+                setTimeout(() => updateUI(), 500);
+            }
+        }
+
+        function isValidMove(curr, next) {
+            // 1. Boundaries
+            if (next.c < 0 || next.c > 2) return false;
+            if (next.r > 4) return false;
+
+            // 2. Destination Logic (Row 4)
+            if (next.r === 4) {
+                // Must come from Row 3
+                if (curr.r !== 3) return false;
+                return true; 
+            }
+            return true;
+        }
+
+        function renderPathVisuals() {
+            // Clear previous highlights
+            document.querySelectorAll('.zone').forEach(z => {
+                z.classList.remove('path-active');
+                z.classList.remove('destination-reached');
+            });
+
+            path.forEach((pos, index) => {
+                let id = `z_${pos.r}_${pos.c}`;
+                if (pos.r === 4) id = `z_4_1`; 
+                
+                const el = document.getElementById(id);
+                if(el) el.classList.add('path-active');
+            });
+
+            // Position the marble sprite at the HEAD of the path
+            const lastPos = path[path.length - 1];
+            placeMarbleSprite(lastPos.r, lastPos.c);
+        }
+
+        function placeMarbleSprite(r, c, customX = null, customY = null) {
+            elMarble.style.display = 'block';
+            elMarble.style.transition = 'top 0.4s linear, left 0.4s linear';
+            
+            if (customX !== null && customY !== null) {
+                // Absolute positioning manual override (for animation)
+                elMarble.style.left = customX + 'px';
+                elMarble.style.top = customY + 'px';
+                return;
+            }
+
+            let targetId = `z_${r}_${c}`;
+            if(r === 4) targetId = 'z_4_1';
+            
+            const targetZone = document.getElementById(targetId);
+            const gridRect = document.getElementById('gridBoard').getBoundingClientRect();
+            
+            // If target is somehow null (shouldn't happen), abort
+            if(!targetZone) return;
+
+            const zoneRect = targetZone.getBoundingClientRect();
+
+            // Calculate positions relative to grid container
+            const top = zoneRect.top - gridRect.top;
+            const left = zoneRect.left - gridRect.left;
+            
+            // Center marble (Zone ~80, Marble 40)
+            const centerX = (zoneRect.width - 40) / 2;
+            const centerY = (zoneRect.height - 40) / 2;
+
+            elMarble.style.top = (top + centerY) + 'px';
+            elMarble.style.left = (left + centerX) + 'px';
+        }
+
+        /* --- Utility: Hybrid Undo/Reset --- */
+        let holdTimer = null;
+        const HOLD_DURATION = 1000; // 1s
+        let isResetTriggered = false;
+
+        function startHold() {
+            if (btnUndo.disabled) return;
+            isResetTriggered = false;
+            btnUndo.classList.add('holding'); 
+            
+            holdTimer = setTimeout(() => {
+                triggerReset();
+                isResetTriggered = true;
+            }, HOLD_DURATION);
+        }
+
+        function endHold() {
+            if (btnUndo.disabled) return;
+            clearTimeout(holdTimer);
+            btnUndo.classList.remove('holding'); 
+
+            if (!isResetTriggered) {
+                performUndo();
+            }
+        }
+
+        function cancelHold() {
+            clearTimeout(holdTimer);
+            btnUndo.classList.remove('holding');
+        }
+
+        function performUndo() {
+            if (currentState !== STATE.PLANNING) return;
+
+            path.pop();
+
+            if (path.length === 0) {
+                // Path empty, return marble to hand
+                handCount++;
+                elMarble.style.display = 'none';
+                currentState = STATE.READY;
+            } else {
+                renderPathVisuals();
+            }
+            updateUI();
+        }
+
+        function triggerReset() {
+            if (currentState === STATE.RUNNING) return; 
+
+            path = [];
+            elMarble.style.display = 'none';
+            
+            // If marble was on board, return to hand
+            if (currentState === STATE.PLANNING) {
+                handCount++;
+            }
+            
+            document.querySelectorAll('.zone').forEach(z => z.classList.remove('path-active'));
+            
+            currentState = (handCount > 0) ? STATE.READY : STATE.IDLE;
+            
+            elStatus.innerText = "SYSTEM RESET";
+            elStatus.style.color = "var(--accent-red)";
+            setTimeout(() => updateUI(), 800);
+
+            updateUI();
+        }
+
+        /* --- Execution Phase --- */
+        async function executeJourney() {
+            if (currentState !== STATE.PLANNING) return;
+            if (path[path.length-1].r !== 4) return;
+
+            currentState = STATE.RUNNING;
+            updateUI();
+
+            // 1. Animate along the path
+            for (let i = 0; i < path.length; i++) {
+                const step = path[i];
+                placeMarbleSprite(step.r, step.c);
+                await new Promise(r => setTimeout(r, 400)); // Path speed
+            }
+
+            // 2. Lift / Return Animation
+            document.getElementById('z_4_1').classList.add('reached');
+            elStatus.innerText = "RETURNING...";
+            
+            const gridRect = document.getElementById('gridBoard').getBoundingClientRect();
+            const destRect = document.getElementById('z_4_1').getBoundingClientRect();
+            
+            // Current X,Y relative to grid
+            let currentX = parseFloat(elMarble.style.left);
+            let currentY = parseFloat(elMarble.style.top);
+
+            // Step A: Move Right (into the pipe zone)
+            // Grid width approx 270. Pipe is at ~270.
+            let pipeX = 280; 
+            placeMarbleSprite(0,0, pipeX, currentY);
+            await new Promise(r => setTimeout(r, 500));
+
+            // Step B: Move Up (to top of pipe)
+            let pipeTopY = -10; // slightly above grid
+            placeMarbleSprite(0,0, pipeX, pipeTopY);
+            await new Promise(r => setTimeout(r, 800)); // slower for lift
+
+            // Step C: Move Left (Into Barrel visual area)
+            // Barrel UI is roughly above S1/S2. Let's just fly it off screen left or fade
+            let barrelTargetX = 50; 
+            placeMarbleSprite(0,0, barrelTargetX, pipeTopY);
+            // Start fade out during this move
+            elMarble.style.opacity = '0'; 
+            await new Promise(r => setTimeout(r, 500));
+
+            // 3. Update Logic
+            barrelCount++;
+            elMarble.style.display = 'none';
+            elMarble.style.opacity = '1'; // Reset opacity for next time
+            document.getElementById('z_4_1').classList.remove('reached');
+
+            // Clear path
+            document.querySelectorAll('.zone').forEach(z => z.classList.remove('path-active'));
+            path = [];
+
+            // Return to state
+            currentState = (handCount > 0) ? STATE.READY : STATE.IDLE;
+            updateUI();
+            
+            // Flash Barrel Count
+            elBarrel.style.color = "#fff";
+            elBarrel.style.textShadow = "0 0 10px #fff";
+            setTimeout(() => {
+                 elBarrel.style.color = "var(--accent-blue)";
+                 elBarrel.style.textShadow = "none";
+            }, 500);
+        }
+
+        // Initial Setup
+        updateUI();
+
+        // Window resize fix
+        window.addEventListener('resize', () => {
+            if (path.length > 0) {
+                const last = path[path.length - 1];
+                placeMarbleSprite(last.r, last.c);
+            }
+        });
+
+    </script>
+</body>
+</html>
