@@ -5,7 +5,7 @@ Esta carpeta contiene la simulación lógica del sistema de canicas. Es una herr
 ## Ver Online
 Puedes probar la simulación directamente en tu navegador sin descargar nada haciendo click aquí:
 
-👉 **[Probar Simulación]https://htmlpreview.github.io/?https://github.com/Quetrix/Proyecto-Circuito-Vertical-de-Canicas-STM32/blob/main/simulation/simulacion_v3.html**
+👉 **[Probar Simulación](https://htmlpreview.github.io/?https://github.com/Quetrix/Proyecto-Circuito-Vertical-de-Canicas-STM32/blob/main/simulation/simulacion_v3.html)**
 
 ---
 
