@@ -1,7 +1,0 @@
-Activar el entorno virtual Python3:
-
-source venv/bin/activate
-
-Salir del entorno virtual:
-
-deactivate
