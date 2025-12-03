@@ -43,6 +43,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim4;
 
 UART_HandleTypeDef huart2;
 
@@ -50,6 +51,16 @@ UART_HandleTypeDef huart2;
 // --- VARIABLES DE ESTADO ---
 volatile int32_t pasos_restantes_horiz = 0;
 volatile int32_t pasos_restantes_vert = 0; // Moverá a M1 y M2 simultáneamente
+
+// --- SERVO CONFIG ---
+// Servo de 270 grados.
+// 0 grados = 500 us
+// 270 grados = 2500 us
+// Rango = 2000 us para 270 grados.
+// Factor: (2000 / 270) ~= 7.41 us por grado.
+// Offset: 500 us.
+#define SERVO_MIN_PULSE 500
+#define SERVO_MAX_PULSE 2500
 
 // Índices de paso actuales (0-7) para cada motor
 volatile int8_t idx_h = 0;
@@ -75,6 +86,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -113,6 +125,18 @@ void Mover_Horizontal(int32_t pasos) {
 
 void Mover_Vertical(int32_t pasos) {
     pasos_restantes_vert = pasos;  // + Subir, - Bajar
+}
+
+void Mover_Servo(uint16_t angulo) {
+    // Protección de límites físicos (0 a 270)
+    if (angulo > 270) angulo = 270;
+
+    // Cálculo del ancho de pulso (Pulse Width)
+    // Formula: Pulso = Offset + (Angulo * (Rango / Max_Grados))
+    uint32_t pulso = SERVO_MIN_PULSE + (angulo * 2000 / 270);
+
+    // Actualizar el registro CCR1 del Timer 4
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, pulso);
 }
 
 // --- FUNCIÓN CRÍTICA DE INTERRUPCIÓN ---
@@ -180,8 +204,15 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   MX_TIM2_Init();
+  MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Base_Start_IT(&htim2); // Timer de motores
+
+  // INICIAR PWM SERVO
+    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
+
+    // Posición inicial segura (0 grados - Canasta Horizontal)
+    Mover_Servo(0);
 
   // Iniciar recepción UART (Primer byte)
   HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
@@ -319,6 +350,65 @@ static void MX_TIM2_Init(void)
 }
 
 /**
+  * @brief TIM4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM4_Init(void)
+{
+
+  /* USER CODE BEGIN TIM4_Init 0 */
+
+  /* USER CODE END TIM4_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM4_Init 1 */
+
+  /* USER CODE END TIM4_Init 1 */
+  htim4.Instance = TIM4;
+  htim4.Init.Prescaler = 84-1;
+  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim4.Init.Period = 20000-1;
+  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM4_Init 2 */
+
+  /* USER CODE END TIM4_Init 2 */
+  HAL_TIM_MspPostInit(&htim4);
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -410,29 +500,70 @@ static void MX_GPIO_Init(void)
 // Callback: Se llama cada vez que llega un byte por UART
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
+  // Verificar que la interrupción viene del UART2 (USB)
   if (huart->Instance == USART2)
   {
-    // Si recibimos un 'Enter' (\n) o llenamos el buffer, terminamos
-    if (rx_byte == '\n' || rx_index >= RX_BUFFER_SIZE - 1)
+    // CASO 1: Recibimos el caracter de final de linea ('\n')
+    // Aquí es donde procesamos el comando completo
+    if (rx_byte == '\n')
     {
-      rx_buffer[rx_index] = '\0'; // Carácter nulo para terminar el string
-      rx_index = 0;               // Reiniciar índice
-      comando_listo = 1;          // ¡Avisar al Main!
-    }
-    else
-    {
-      // Guardar carácter y avanzar, pero ignorar caracteres basura (como \r)
-      if(rx_byte != '\r') {
-          rx_buffer[rx_index++] = rx_byte;
+      rx_buffer[rx_index] = '\0'; // Terminamos el string
+      rx_index = 0;               // Reiniciamos índice para el próximo
+
+      // --- PARSEO DE COMANDOS ---
+      char cmd_char = rx_buffer[0];           // La letra (H, V, S)
+      int valor = atoi((char*)&rx_buffer[1]); // El número (convertido a int)
+
+      // Ejecutar directamente usando tus funciones existentes
+      if (cmd_char == 'H' || cmd_char == 'h')
+      {
+          Mover_Horizontal(valor);
+      }
+      else if (cmd_char == 'V' || cmd_char == 'v')
+      {
+          Mover_Vertical(valor);
+      }
+      // --- NUEVO: CONTROL DE SERVO ---
+      else if (cmd_char == 'S' || cmd_char == 's')
+      {
+          Mover_Servo(valor);
       }
     }
+    // CASO 2: Buffer lleno (Seguridad)
+    else if (rx_index >= RX_BUFFER_SIZE - 1)
+    {
+        rx_index = 0; // Reiniciar si se llena sin recibir \n
+    }
+    // CASO 3: Recibimos un caracter normal
+    else
+    {
+        // Guardar caracter (ignorando el 'Carriage Return' \r de Windows)
+        if(rx_byte != '\r')
+        {
+            rx_buffer[rx_index++] = rx_byte;
+        }
+    }
 
-    // IMPORTANTE: Volver a activar la escucha para el siguiente byte
+    // IMPORTANTE: Volver a activar la escucha para el siguiente byte SIEMPRE
     HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
   }
 }
-
 // ... Las funciones de escritura y movimiento de motores estan en USER CODE 0
+
+// Callback para el Botón de Usuario (PC13)
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == B1_Pin) // Botón Azul
+  {
+      // 1. Parada de Emergencia Motores Pasos
+      pasos_restantes_horiz = 0;
+      pasos_restantes_vert = 0;
+      
+      // 2. Servo a Posición Segura (0 grados)
+      Mover_Servo(0);
+  }
+}
+
 /* USER CODE END 4 */
 
 /**
