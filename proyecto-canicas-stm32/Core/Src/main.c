@@ -141,7 +141,7 @@ void Mover_Vertical_L(int32_t pasos) {
 void Mover_Vertical_R(int32_t pasos) {
     pasos_restantes_v_der = pasos;
 }
-}
+
 
 void Mover_Servo(uint16_t angulo) {
     // Protección de límites físicos (0 a 270)
@@ -254,7 +254,7 @@ int main(void)
           }
           else if (cmd == 'V' || cmd == 'v') // Comando Vertical
           {
-              Mover_Vertical(pasos);
+              Mover_Vertical_Sync(pasos);
           }
 
           // Opcional: Responder "OK" a la Raspberry
