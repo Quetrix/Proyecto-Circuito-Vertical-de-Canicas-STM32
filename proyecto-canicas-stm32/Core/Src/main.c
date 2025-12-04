@@ -48,30 +48,6 @@ TIM_HandleTypeDef htim4;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-// --- VARIABLES DE ESTADO ---
-volatile int32_t pasos_restantes_horiz = 0;
-volatile int32_t pasos_restantes_vert = 0; // Moverá a M1 y M2 simultáneamente
-
-// --- SERVO CONFIG ---
-// Servo de 270 grados.
-// 0 grados = 500 us
-// 270 grados = 2500 us
-// Rango = 2000 us para 270 grados.
-// Factor: (2000 / 270) ~= 7.41 us por grado.
-// Offset: 500 us.
-#define SERVO_MIN_PULSE 500
-#define SERVO_MAX_PULSE 2500
-
-// Índices de paso actuales (0-7) para cada motor
-volatile int8_t idx_h = 0;
-volatile int8_t idx_vL = 0;
-volatile int8_t idx_vR = 0;
-
-// Secuencia Half-Step (8 pasos)
-const uint8_t sequence[8][4] = {
-  {1,0,0,0}, {1,1,0,0}, {0,1,0,0}, {0,1,1,0},
-  {0,0,1,0}, {0,0,1,1}, {0,0,0,1}, {1,0,0,1}
-};
 
 // --- VARIABLES UART ---
 #define RX_BUFFER_SIZE 32
@@ -92,7 +68,32 @@ static void MX_TIM4_Init(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
+
 /* USER CODE BEGIN 0 */
+// ESTA SECCIÓN AHORA CONTIENE TODAS LAS DEFINICIONES GLOBALES DE MOTORES Y EL SERVO
+
+// --- VARIABLES DE ESTADO ---
+volatile int32_t pasos_restantes_horiz = 0;
+volatile int32_t pasos_restantes_vert = 0;
+
+// Índices de paso actuales (0-7) para cada motor
+volatile int8_t idx_h = 0;
+volatile int8_t idx_vL = 0;
+volatile int8_t idx_vR = 0;
+
+// Secuencia Half-Step (8 pasos)
+const uint8_t sequence[8][4] = {
+  {1,0,0,0}, {1,1,0,0}, {0,1,0,0}, {0,1,1,0},
+  {0,0,1,0}, {0,0,1,1}, {0,0,0,1}, {1,0,0,1}
+};
+
+// --- SERVO CONFIG ---
+#define SERVO_MIN_PULSE 500
+#define SERVO_MAX_PULSE 2500
+#define SERVO_ANGULO_CERRADO 65  // Posición de reposo/transporte
+#define SERVO_ANGULO_ABIERTO 25  // Posición de volcado
+
+
 void stepper_write(int motor_id, int step_index) {
     const uint8_t* p = sequence[step_index % 8];
 
@@ -205,18 +206,16 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM2_Init();
   MX_TIM4_Init();
+
   /* USER CODE BEGIN 2 */
-  HAL_TIM_Base_Start_IT(&htim2); // Timer de motores
+    HAL_TIM_Base_Start_IT(&htim2); // Iniciar Timer Pasos
+    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1); // Iniciar PWM Servo
 
-  // INICIAR PWM SERVO
-    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
+    HAL_UART_Receive_IT(&huart2, &rx_byte, 1); // Iniciar UART
 
-    // Posición inicial segura (0 grados - Canasta Horizontal)
-    Mover_Servo(0);
-
-  // Iniciar recepción UART (Primer byte)
-  HAL_UART_Receive_IT(&huart2, &rx_byte, 1);
-  /* USER CODE END 2 */
+    // POSICION INICIAL SEGURA (CERRADO = 65 grados)
+    Mover_Servo(SERVO_ANGULO_CERRADO);
+    /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -491,6 +490,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
@@ -553,17 +556,16 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 // Callback para el Botón de Usuario (PC13)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-  if (GPIO_Pin == B1_Pin) // Botón Azul
+  if (GPIO_Pin == B1_Pin) // Botón Azul (PC13)
   {
-      // 1. Parada de Emergencia Motores Pasos
+      // 1. FRENADO DE EMERGENCIA
       pasos_restantes_horiz = 0;
       pasos_restantes_vert = 0;
       
-      // 2. Servo a Posición Segura (0 grados)
-      Mover_Servo(0);
+      // 2. SERVO A POSICION SEGURA (Cerrado = 65 grados)
+      Mover_Servo(SERVO_ANGULO_CERRADO);
   }
 }
-
 /* USER CODE END 4 */
 
 /**
