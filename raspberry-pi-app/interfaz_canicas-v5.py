@@ -289,13 +289,20 @@ class MarbleInterfaceFinal:
             self.rutina_volcado_y_retorno()
 
     def rutina_volcado_y_retorno(self):
-        # Popup bloqueante (ShowInfo es un OK button)
-        messagebox.showinfo("Llegada", "Canica en Destino.\nPresione OK cuando este vacia.")
+        # 1. Popup bloqueante
+        messagebox.showinfo("Llegada", "Canica en Destino.\nEl sistema volcará la canasta ahora.")
         
+        # 2. Secuencia de Volcado con los NUEVOS ANGULOS
+        print("Volcando canasta...")
+        self.enviar_comando("S25")  # ABRIR (25 grados)
+        time.sleep(1.5)             # Esperar a que caiga la canica
+        self.enviar_comando("S65")  # CERRAR (65 grados)
+        time.sleep(1.0)             # Esperar a que se cierre bien
+        
+        # 3. Actualizar contador y regresar
         self.contador_estanon += 1
         self.lbl_estanon.config(text=f"Estanon: {self.contador_estanon}")
         
-        # Iniciar retorno automatico en hilo
         self.iniciar_retorno_thread("S1")
 
     # --- MODO 2: PROGRAMADO ---
