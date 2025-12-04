@@ -1,48 +1,53 @@
-# ⚙️ Conexiones y Protocolo de Control (STM32 Nucleo-F446RE)
+# ⚙️ Firmware de Control - STM32 Nucleo F446RE
 
-Este documento detalla el mapeo de pines utilizado y el protocolo de comunicación implementado para controlar el circuito vertical de canicas.
+Este documento detalla el mapeo de pines utilizado y el protocolo de comunicación implementado en el firmware del microcontrolador (C/HAL).
 
 ## 1. Diagrama de Referencia
 
-Para ubicar los pines en la placa, consulte el diagrama de pinout:
+Para ubicar los pines en la placa Nucleo, consulte el siguiente diagrama de pinout, el cual muestra la distribución de los puertos GPIO:
 
 ![Pinout de la placa Nucleo-F446RE](pinout.png)
 
 ## 2. Mapeo de Pines para Actuadores
 
-Los 12 pines del microcontrolador están configurados como **GPIO Output** y conectados a los 12 pines de entrada de los drivers ULN2003.
+El sistema de control utiliza **12 pines GPIO** para los motores paso a paso y **1 pin PWM** para el servomotor de volcado.
 
-| Motor | Bobina del Motor | Pin del Microcontrolador (STM32) | Pin Arduino (Etiqueta de la Placa) | Conector del Driver |
+| Actuador | Eje / Función | Pin del Microcontrolador (STM32) | Pin Arduino (Placa) | Tipo de Control |
 | :--- | :--- | :--- | :--- | :--- |
-| **Horizontal (M0)** | Bobina 1-4 | PA0, PA1, PA4, PB0 | A0, A1, A2, A3 | IN1, IN2, IN3, IN4 |
-| **Vertical Izquierdo (M1)**| Bobina 1-4 | PA5, PA6, PA7, PA8 | D13, D12, D11, D7 | IN1, IN2, IN3, IN4 |
-| **Vertical Derecho (M2)** | Bobina 1-4 | **PB4, PA10, PB3, PB1** | **D5, D2, D3, D14** | IN1, IN2, IN3, IN4 |
+| **Motor 0** | Horizontal (X) | PA0, PA1, PA4, PB0 | A0, A1, A2, A3 | GPIO Output |
+| **Motor 1** | Vertical Izquierdo | PA5, PA6, PA7, PA8 | D13, D12, D11, D7 | GPIO Output |
+| **Motor 2** | Vertical Derecho | **PB4, PA10, PB3, PB1** | D5, D2, D3, D14 | GPIO Output |
+| **Servomotor** | Volcado (Descarga) | **PB6 (TIM4_CH1)** | **D10** | PWM (50 Hz) |
 
-## 3. Comunicación Serial (UART / RS-232)
+## 3. Configuración y Periféricos
 
-El STM32 está configurado para escuchar órdenes asíncronas de la Raspberry Pi (RPi) a través del cable USB (Virtual COM Port).
+El firmware implementa programación no bloqueante utilizando interrupciones para las tareas principales:
 
-### 3.1. Configuración de Conexión (Lado RPi)
-Para abrir la comunicación desde Python (usando la librería `pySerial`), se deben usar los siguientes parámetros:
+* **TIM2:** Generación de pulsos para el movimiento de los motores paso a paso.
+* **TIM4:** Generación de señal **PWM** para el control del servomotor.
+* **USART2:** Recepción de comandos seriales (UART) de la Raspberry Pi.
+* **EXTI (PC13):** Interrupción externa para la función de **Parada de Emergencia** (Botón Azul).
 
-* **Puerto:** `/dev/ttyACM0` (Verificar con `ls /dev/ttyACM*` en la terminal).
-* **Baud Rate (Velocidad):** `115200`
-* **Permisos:** El usuario `micropenes` debe tener permisos para usar el grupo `dialout`.
+## 4. Protocolo de Comunicación Serial (UART / RS-232)
 
-### 3.2. Protocolo de Comandos (Lado STM32)
+El STM32 escucha comandos a una velocidad de **115200 baudios**. Todos los comandos deben terminar obligatoriamente con un salto de línea (`\n`).
 
-El microcontrolador espera un comando en el formato **[Comando][Pasos]**, **TERMINADO OBLIGATORIAMENTE con un salto de línea (`\n`)**.
+### 4.1. Comandos Aceptados (STM32)
 
 | Comando | Formato | Descripción |
 | :--- | :--- | :--- |
-| **Horizontal** | `H` o `h` + número | Mueve el motor Horizontal. El valor positivo es Derecha, el negativo es Izquierda. |
-| **Vertical** | `V` o `v` + número | Mueve los motores Verticales (M1 y M2) de forma sincronizada. El valor positivo es Arriba (Subir), el negativo es Abajo (Bajar). |
-| **Ejemplo** | `H2048` | Mueve el motor Horizontal 2048 pasos hacia la derecha. |
+| **Horizontal** | `H` o `h` + número | Controla el eje X. Valores positivos/negativos definen la dirección. |
+| **Vertical** | `V` o `v` + número | Controla el eje Y. Valores positivos/negativos definen la dirección (Arriba/Abajo). |
+| **Servomotor** | **`S`** o **`s`** + ángulo | Mueve el servomotor al ángulo absoluto (0-270). |
 
-**Nota Crítica:** El carácter `\n` es la señal que el STM32 usa para saber que el comando ha finalizado. En Python, esto se logra enviando la cadena seguida de `\n` (e.g., `ser.write("H2048\n".encode('utf-8'))`).
+| Parámetro del Servo | Ángulo (grados) |
+| :--- | :--- |
+| **Posición Cerrada (Reposo)** | **65** |
+| **Posición Abierta (Volcado)** | **25** |
 
+**Nota Crítica:** El carácter `\n` es la señal que la interrupción del STM32 usa para finalizar el comando y comenzar el parseo.
 
-## 4. Consideraciones Eléctricas
+## 5. Consideraciones de Seguridad
 
-* **Tierra Común (GND):** El negativo de la fuente de alimentación externa de 5V para los drivers debe estar conectado al **GND** de la placa Nucleo.
-* **Inversión de Giro:** La inversión de dirección para el movimiento nivelado de la plataforma Vertical se maneja por **software** para el Motor M2, aunque la conexión física se ajustó para lograr la oposición inicial.
+* **Frenado:** La interrupción del botón de usuario (EXTI) detiene inmediatamente los motores paso a paso (`pasos_restantes = 0`) y sitúa el servo en la posición segura de **Cerrado (65 grados)**.
+* **GND:** El polo negativo de la fuente de alimentación externa del servo y los drivers debe estar conectado al **GND** de la placa Nucleo.
