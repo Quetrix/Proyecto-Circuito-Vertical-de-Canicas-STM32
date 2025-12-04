@@ -74,7 +74,9 @@ static void MX_TIM4_Init(void);
 
 // --- VARIABLES DE ESTADO ---
 volatile int32_t pasos_restantes_horiz = 0;
-volatile int32_t pasos_restantes_vert = 0;
+
+volatile int32_t pasos_restantes_v_izq = 0; // Motor M1
+volatile int32_t pasos_restantes_v_der = 0; // Motor M2
 
 // Índices de paso actuales (0-7) para cada motor
 volatile int8_t idx_h = 0;
@@ -124,8 +126,21 @@ void Mover_Horizontal(int32_t pasos) {
     pasos_restantes_horiz = pasos; // + Derecha, - Izquierda
 }
 
-void Mover_Vertical(int32_t pasos) {
-    pasos_restantes_vert = pasos;  // + Subir, - Bajar
+// Mover AMBOS (Comando V normal)
+void Mover_Vertical_Sync(int32_t pasos) {
+    pasos_restantes_v_izq = pasos;
+    pasos_restantes_v_der = pasos;
+}
+
+// Mover SOLO IZQUIERDA (Nuevo Comando L)
+void Mover_Vertical_L(int32_t pasos) {
+    pasos_restantes_v_izq = pasos;
+}
+
+// Mover SOLO DERECHA (Nuevo Comando R)
+void Mover_Vertical_R(int32_t pasos) {
+    pasos_restantes_v_der = pasos;
+}
 }
 
 void Mover_Servo(uint16_t angulo) {
@@ -144,7 +159,7 @@ void Mover_Servo(uint16_t angulo) {
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     if (htim->Instance == TIM2) {
 
-        // 1. Manejo de Motor Horizontal
+        // 1. Motor Horizontal (Sin cambios)
         if (pasos_restantes_horiz != 0) {
             int8_t dir = (pasos_restantes_horiz > 0) ? 1 : -1;
             idx_h = (idx_h + 8 + dir) % 8;
@@ -152,23 +167,24 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
             pasos_restantes_horiz -= dir;
         }
 
-        // 2. Manejo de Motores Verticales (Opuestos y Sincronizados)
-        if (pasos_restantes_vert != 0) {
-            int8_t dir_maestro = (pasos_restantes_vert > 0) ? 1 : -1; // 1=Subir, -1=Bajar
-
-            // Lógica de Espejo:
-            // Para M1 (Izq): Gira en la dirección maestra (dir_maestro)
-            // Para M2 (Der): Gira en la dirección opuesta a la maestra (-dir_maestro)
-            int8_t dir_L = dir_maestro;
-            int8_t dir_R = -dir_maestro;
-
+        // 2. Motor Vertical IZQUIERDO (M1) - Independiente
+        if (pasos_restantes_v_izq != 0) {
+            int8_t dir_L = (pasos_restantes_v_izq > 0) ? 1 : -1; // 1=Subir
             idx_vL = (idx_vL + 8 + dir_L) % 8;
+            stepper_write(1, idx_vL);
+            pasos_restantes_v_izq -= dir_L;
+        }
+
+        // 3. Motor Vertical DERECHO (M2) - Independiente
+        if (pasos_restantes_v_der != 0) {
+            // NOTA: M2 está montado en espejo, su giro físico debe ser opuesto a M1 para subir.
+            // Si 'pasos_restantes' es positivo (queremos subir), dir_fisica debe ser negativa.
+            int8_t dir_input = (pasos_restantes_v_der > 0) ? 1 : -1;
+            int8_t dir_R = -dir_input; // INVERSION FISICA
+
             idx_vR = (idx_vR + 8 + dir_R) % 8;
-
-            stepper_write(1, idx_vL); // Motor Izquierdo
-            stepper_write(2, idx_vR); // Motor Derecho (Movimiento Opuesto)
-
-            pasos_restantes_vert -= dir_maestro;
+            stepper_write(2, idx_vR);
+            pasos_restantes_v_der -= dir_input; // Restamos la intención lógica
         }
     }
 }
@@ -522,10 +538,22 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
       {
           Mover_Horizontal(valor);
       }
+
       else if (cmd_char == 'V' || cmd_char == 'v')
       {
-          Mover_Vertical(valor);
+          Mover_Vertical_Sync(valor); // Mueve ambos
       }
+      // NUEVO: Solo Izquierda
+      else if (cmd_char == 'L' || cmd_char == 'l')
+      {
+          Mover_Vertical_L(valor);
+      }
+      // NUEVO: Solo Derecha
+      else if (cmd_char == 'R' || cmd_char == 'r')
+      {
+          Mover_Vertical_R(valor);
+      }
+
       // --- NUEVO: CONTROL DE SERVO ---
       else if (cmd_char == 'S' || cmd_char == 's')
       {
@@ -560,7 +588,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   {
       // 1. FRENADO DE EMERGENCIA
       pasos_restantes_horiz = 0;
-      pasos_restantes_vert = 0;
+      pasos_restantes_v_der = 0;
+      pasos_restantes_v_izq = 0;
+
       
       // 2. SERVO A POSICION SEGURA (Cerrado = 65 grados)
       Mover_Servo(SERVO_ANGULO_CERRADO);
