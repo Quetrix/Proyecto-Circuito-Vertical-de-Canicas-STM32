@@ -26,13 +26,16 @@ TIME_SERVO  = 1.5
 class MarbleInterfaceFinal:
     def __init__(self, root):
         self.root = root
-        self.root.title("SISTEMA DE CONTROL V5.6")
+        self.root.title("SISTEMA DE CONTROL V6")
         self.root.geometry("1024x600")
         self.root.configure(bg="#1e293b") 
 
         # --- ESTADO DEL SISTEMA ---
         self.ser = None
         self.connect_serial()
+
+        # Hilo de escucha serial (eventos de canicas)
+        self.thread_serial = None
         
         self.posicion_actual = "S1"
         self.columna_virtual_destino = 1 
@@ -57,6 +60,14 @@ class MarbleInterfaceFinal:
         }
 
         self.setup_ui()
+
+        # Iniciar listener solo si hay puerto serie real
+        if self.ser and self.ser.is_open:
+            self.thread_serial = threading.Thread(
+                target=self._serial_listener,
+                daemon=True
+            )
+            self.thread_serial.start()
 
     def connect_serial(self):
         try:
