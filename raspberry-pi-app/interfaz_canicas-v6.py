@@ -77,6 +77,54 @@ class MarbleInterfaceFinal:
         except Exception:
             print("MODO SIMULACION (Sin Serial)")
 
+    
+    def _serial_listener(self):
+        """Hilo que corre en segundo plano escuchando mensajes del STM32."""
+        while True:
+            # Este loop es infinito mientras viva el programa
+            if self.ser and self.ser.is_open:
+                try:
+                    # Si hay datos esperando...
+                    if self.ser.in_waiting > 0:
+                        line = self.ser.readline().decode('utf-8', errors='ignore').strip()
+                        
+                        # Si es un mensaje de evento (#IN, #OUT, etc.)
+                        if line.startswith('#'):
+                            # IMPORTANTE: No actualizar GUI desde este hilo.
+                            # Usamos root.after para agendar la actualización en el hilo principal.
+                            self.root.after(0, lambda: self._procesar_datos_serial(line))
+                            
+                except Exception as e:
+                    print(f"Error en listener serial: {e}")
+            
+            # Pequeña pausa para no saturar el CPU
+            time.sleep(0.05)
+
+    def _procesar_datos_serial(self, line):
+        """Recibe la línea cruda (#TIPO,ent,sal,act), parsea y actualiza la UI."""
+        try:
+            # Formato esperado: #IN,5,2,3  (Tipo, Entradas, Salidas, Actuales)
+            parts = line.split(',')
+            if len(parts) >= 4:
+                # tipo = parts[0]
+                entradas = int(parts[1])
+                salidas = int(parts[2])
+                actuales = int(parts[3])
+
+                # Actualizar variables internas
+                self.contador_canicas = actuales
+                self.canicas_entrada_stm32 = entradas
+                self.canicas_salida_stm32 = salidas
+
+                # Actualizar etiqueta en pantalla (si existe)
+                if hasattr(self, 'lbl_canicas'):
+                    self.lbl_canicas.config(text=f"Canicas en Estañón: {self.contador_canicas}")
+                    
+                print(f"Evento STM32 procesado: {line}")
+                
+        except ValueError:
+            print(f"Error parseando trama: {line}")
+
     def enviar_comando(self, cmd):
         # SEGURIDAD: Si hay STOP, bloquear todo menos el frenado
         if self.stop_emergencia and cmd not in ["H0", "V0", "S65"]:
