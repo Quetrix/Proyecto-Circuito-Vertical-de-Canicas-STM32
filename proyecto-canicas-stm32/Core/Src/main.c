@@ -43,6 +43,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 
 UART_HandleTypeDef huart2;
@@ -63,12 +64,12 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM4_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
-
 /* USER CODE BEGIN 0 */
 // ESTA SECCIÓN AHORA CONTIENE TODAS LAS DEFINICIONES GLOBALES DE MOTORES Y EL SERVO
 
@@ -77,6 +78,30 @@ volatile int32_t pasos_restantes_horiz = 0;
 
 volatile int32_t pasos_restantes_v_izq = 0; // Motor M1
 volatile int32_t pasos_restantes_v_der = 0; // Motor M2
+
+// --- CONTADOR DE CANICAS (DOS SENSORES HC-SR04) ---
+
+int canicasEntrada  = 0;
+int canicasSalida   = 0;
+int canicasActuales = 0;
+
+bool canicaDetectada1 = false;
+bool canicaDetectada2 = false;
+
+const int distanciaSinCanica = 20;
+const int umbralDeteccion    = 5;
+const int distanciaMinima    = 2;
+
+uint32_t tiempoUltimaDeteccion1 = 0;
+uint32_t tiempoUltimaDeteccion2 = 0;
+const uint32_t tiempoEspera     = 500;
+
+uint32_t tiempoUltimaMuestra    = 0;
+const uint32_t intervaloMuestreo = 100;
+
+uint32_t tiempoUltimoEstado     = 0;
+const uint32_t intervaloEstado  = 2000;
+
 
 // Índices de paso actuales (0-7) para cada motor
 volatile int8_t idx_h = 0;
@@ -188,6 +213,99 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
         }
     }
 }
+
+// ================== ULTRASONIDO: MEDICIÓN ==================
+//
+// Usamos TIM3 como contador a 1 MHz (1 tick = 1 µs).
+// TIM3 ya está configurado y arrancado en USER CODE 2.
+
+float MedirDistancia_cm(uint8_t sensor_id)
+{
+    GPIO_TypeDef *trig_port;
+    uint16_t trig_pin;
+    GPIO_TypeDef *echo_port;
+    uint16_t echo_pin;
+
+    if (sensor_id == 1)
+    {
+        trig_port = TRIG1_GPIO_Port;
+        trig_pin  = TRIG1_Pin;
+        echo_port = ECHO1_GPIO_Port;
+        echo_pin  = ECHO1_Pin;
+    }
+    else
+    {
+        trig_port = TRIG2_GPIO_Port;
+        trig_pin  = TRIG2_Pin;
+        echo_port = ECHO2_GPIO_Port;
+        echo_pin  = ECHO2_Pin;
+    }
+
+    // Asegurar TRIG en bajo
+    HAL_GPIO_WritePin(trig_port, trig_pin, GPIO_PIN_RESET);
+    HAL_Delay(2); // 2 ms para estabilizar
+
+    // Generar pulso de 10 µs en TRIG usando TIM3
+    __HAL_TIM_SET_COUNTER(&htim3, 0);
+    HAL_GPIO_WritePin(trig_port, trig_pin, GPIO_PIN_SET);
+    while (__HAL_TIM_GET_COUNTER(&htim3) < 10); // 10 µs
+    HAL_GPIO_WritePin(trig_port, trig_pin, GPIO_PIN_RESET);
+
+    // Esperar flanco de subida en ECHO (máx 30 ms)
+    const uint32_t timeout_us = 30000; // 30,000 µs
+    __HAL_TIM_SET_COUNTER(&htim3, 0);
+
+    while (HAL_GPIO_ReadPin(echo_port, echo_pin) == GPIO_PIN_RESET)
+    {
+        if (__HAL_TIM_GET_COUNTER(&htim3) > timeout_us)
+        {
+            return -1.0f; // Timeout: sin eco
+        }
+    }
+
+    // Medir tiempo en alto del pulso ECHO
+    __HAL_TIM_SET_COUNTER(&htim3, 0);
+    while (HAL_GPIO_ReadPin(echo_port, echo_pin) == GPIO_PIN_SET)
+    {
+        if (__HAL_TIM_GET_COUNTER(&htim3) > timeout_us)
+        {
+            return -1.0f; // Timeout: pulso demasiado largo
+        }
+    }
+
+    uint32_t duracion_us = __HAL_TIM_GET_COUNTER(&htim3);
+
+    // Convertir a distancia en cm (velocidad sonido 343 m/s)
+    float distancia = (duracion_us * 0.0343f) / 2.0f; // ida y vuelta
+
+    return distancia;
+}
+
+// ================== ULTRASONIDO: ENVÍO A RASPBERRY ==================
+//
+// Formato de mensaje (una línea por evento):
+//   #IN,entradas,salidas,actuales\n
+//   #OUT,entradas,salidas,actuales\n
+//
+// La Raspi simplemente escucha y parsea las líneas que empiezan con "#".
+
+void EnviarEventoCanica(const char *tipo)  // tipo = "IN" o "OUT"
+{
+    char msg[64];
+    int len = snprintf(msg, sizeof(msg),
+                       "#%s,%d,%d,%d\n",
+                       tipo,
+                       canicasEntrada,
+                       canicasSalida,
+                       canicasActuales);
+
+    if (len > 0)
+    {
+        HAL_UART_Transmit(&huart2, (uint8_t*)msg, (uint16_t)len, 50);
+    }
+}
+
+
 /* USER CODE END 0 */
 
 /**
@@ -222,50 +340,131 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM2_Init();
   MX_TIM4_Init();
+  MX_TIM3_Init();
+
 
   /* USER CODE BEGIN 2 */
     HAL_TIM_Base_Start_IT(&htim2); // Iniciar Timer Pasos
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1); // Iniciar PWM Servo
+    HAL_TIM_Base_Start(&htim3);   // Iniciar TIM3 como contador libre (1 MHz) para ultrasonidos
+
 
     HAL_UART_Receive_IT(&huart2, &rx_byte, 1); // Iniciar UART
 
     // POSICION INICIAL SEGURA (CERRADO = 65 grados)
     Mover_Servo(SERVO_ANGULO_CERRADO);
-    /* USER CODE END 2 */
+
+
+  /* USER CODE END 2 */
+
 
   /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-      // 1. Verificar si llegó un comando nuevo
-      if (comando_listo)
-      {
-          comando_listo = 0; // Bajar bandera para no repetir
+    /* USER CODE BEGIN WHILE */
+    while (1)
+    {
+        // ====================== UART: COMANDOS DESDE RASPBERRY ======================
+        if (comando_listo)
+        {
+            comando_listo = 0; // Bajar bandera para no repetir
 
-          // El primer carácter nos dice QUÉ motor mover
-          char cmd = rx_buffer[0];
+            char cmd = rx_buffer[0];
+            int32_t pasos = atoi((char*)&rx_buffer[1]);
 
-          // El resto del string es el NÚMERO de pasos (usamos atoi para convertir texto a int)
-          int32_t pasos = atoi((char*)&rx_buffer[1]);
+            if (cmd == 'H' || cmd == 'h')      // Comando Horizontal
+            {
+                Mover_Horizontal(pasos);
+            }
+            else if (cmd == 'V' || cmd == 'v') // Comando Vertical (ambos)
+            {
+                Mover_Vertical_Sync(pasos);
+            }
+            else if (cmd == 'L' || cmd == 'l') // Solo vertical izquierdo
+            {
+                Mover_Vertical_L(pasos);
+            }
+            else if (cmd == 'R' || cmd == 'r') // Solo vertical derecho
+            {
+                Mover_Vertical_R(pasos);
+            }
+            else if (cmd == 'S' || cmd == 's') // Servo
+            {
+                Mover_Servo((uint16_t)pasos);
+            }
+        }
 
-          if (cmd == 'H' || cmd == 'h') // Comando Horizontal
-          {
-              Mover_Horizontal(pasos);
-          }
-          else if (cmd == 'V' || cmd == 'v') // Comando Vertical
-          {
-              Mover_Vertical_Sync(pasos);
-          }
+        // ====================== ULTRASONIDO: MEDICIÓN Y CONTEO ======================
+        uint32_t ahora = HAL_GetTick();
 
-          // Opcional: Responder "OK" a la Raspberry
-          // char msg[] = "OK\n";
-          // HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 10);
-      }
+        // Medimos solo cada 'intervaloMuestreo' ms para no saturar
+        if (ahora - tiempoUltimaMuestra >= intervaloMuestreo)
+        {
+            tiempoUltimaMuestra = ahora;
 
-      // El resto del tiempo, el STM32 sigue moviendo motores gracias al Timer.
-      // No se necesitan delays aquí.
+            // ----- SENSOR 1: ENTRADA -----
+            float d1 = MedirDistancia_cm(1);
 
+            if (d1 > 0 &&
+                d1 > distanciaMinima &&
+                d1 < (distanciaSinCanica - umbralDeteccion))
+            {
+                // Canica detectada en ENTRADA
+                if (!canicaDetectada1 &&
+                    (ahora - tiempoUltimaDeteccion1 > tiempoEspera))
+                {
+                    canicasEntrada++;
+                    canicasActuales++;
+                    canicaDetectada1 = true;
+                    tiempoUltimaDeteccion1 = ahora;
+
+                    EnviarEventoCanica("IN");
+                }
+            }
+            else
+            {
+                canicaDetectada1 = false;
+            }
+
+            // ----- SENSOR 2: SALIDA -----
+            float d2 = MedirDistancia_cm(2);
+
+            if (d2 > 0 &&
+                d2 > distanciaMinima &&
+                d2 < (distanciaSinCanica - umbralDeteccion))
+            {
+                // Canica detectada en SALIDA
+                if (!canicaDetectada2 &&
+                    (ahora - tiempoUltimaDeteccion2 > tiempoEspera))
+                {
+                    canicasSalida++;
+                    if (canicasActuales > 0)
+                    {
+                        canicasActuales--;
+                    }
+                    canicaDetectada2 = true;
+                    tiempoUltimaDeteccion2 = ahora;
+
+                    EnviarEventoCanica("OUT");
+                }
+            }
+            else
+            {
+                canicaDetectada2 = false;
+            }
+
+            // (Opcional) Enviar estado periódico aunque no haya eventos
+            /*
+            if (ahora - tiempoUltimoEstado >= intervaloEstado)
+            {
+                tiempoUltimoEstado = ahora;
+                EnviarEventoCanica("STATE"); // Si quisieras manejar este tipo en la Raspi
+            }
+            */
+        }
+
+        // No usamos delays aquí; los motores siguen avanzando por interrupción de TIM2
+    }
     /* USER CODE END WHILE */
+
 
     /* USER CODE BEGIN 3 */
   }
@@ -340,10 +539,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 84-1;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-
-  // htim2.Init.Period = 1000-1;
-  htim2.Init.Period = 2000-1;
-
+  htim2.Init.Period = 1000-1;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -364,6 +560,51 @@ static void MX_TIM2_Init(void)
   /* USER CODE BEGIN TIM2_Init 2 */
 
   /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 84-1;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 65535;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
 
 }
 
@@ -478,6 +719,9 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, Trig1_Pin|Trig2_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4|GPIO_PIN_5
                           |GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_8, GPIO_PIN_RESET);
 
@@ -490,6 +734,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : Trig1_Pin Trig2_Pin */
+  GPIO_InitStruct.Pin = Trig1_Pin|Trig2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : ECHO1_Pin ECHO2_Pin */
+  GPIO_InitStruct.Pin = ECHO1_Pin|ECHO2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PA0 PA1 PA4 PA5
                            PA6 PA7 PA8 */
