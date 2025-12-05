@@ -11,7 +11,7 @@ BAUD_RATE = 115200
 
 # --- CONFIGURACION FISICA ---
 STEPS_H = 1520
-STEPS_V = 1360
+STEPS_V = 1328
 
 # Ajuste fino (1/8 de celda)
 CALIB_FINE_H = int(STEPS_H / 8)
