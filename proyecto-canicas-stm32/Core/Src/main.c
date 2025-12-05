@@ -342,8 +342,6 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM4_Init();
   MX_TIM3_Init();
-
-
   /* USER CODE BEGIN 2 */
     HAL_TIM_Base_Start_IT(&htim2); // Iniciar Timer Pasos
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1); // Iniciar PWM Servo
@@ -358,9 +356,8 @@ int main(void)
 
   /* USER CODE END 2 */
 
-
   /* Infinite loop */
-    /* USER CODE BEGIN WHILE */
+  /* USER CODE BEGIN WHILE */
     while (1)
     {
         // ====================== ULTRASONIDO: MEDICIÓN Y CONTEO ======================
@@ -427,12 +424,10 @@ int main(void)
     }
     /* USER CODE END WHILE */
 
-
-
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
-}
+
 
 /**
   * @brief System Clock Configuration
@@ -682,7 +677,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, Trig1_Pin|Trig2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, TRIG1_Pin|TRIG2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4|GPIO_PIN_5
@@ -698,8 +693,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : Trig1_Pin Trig2_Pin */
-  GPIO_InitStruct.Pin = Trig1_Pin|Trig2_Pin;
+  /*Configure GPIO pins : TRIG1_Pin TRIG2_Pin */
+  GPIO_InitStruct.Pin = TRIG1_Pin|TRIG2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
