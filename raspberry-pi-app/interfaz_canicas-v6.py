@@ -10,8 +10,8 @@ PORT_NAME = '/dev/ttyACM0'
 BAUD_RATE = 115200
 
 # --- CONFIGURACION FISICA ---
-STEPS_H = 1536
-STEPS_V = 1408
+STEPS_H = 1520
+STEPS_V = 1360
 
 # Ajuste fino (1/8 de celda)
 CALIB_FINE_H = int(STEPS_H / 8)
@@ -19,9 +19,9 @@ CALIB_FINE_V = int(STEPS_V / 8)
 
 # --- TIEMPOS DE ESPERA (Segundos) ---
 # Ajustados para motor lento (periodo 2000 en STM32)
-TIME_MOVE_H = 4.5  
-TIME_MOVE_V = 5.0 
-TIME_SERVO  = 1.5
+TIME_MOVE_H = 3.0  
+TIME_MOVE_V = 3.0
+TIME_SERVO  = 2.0
 
 class MarbleInterfaceFinal:
     def __init__(self, root):
